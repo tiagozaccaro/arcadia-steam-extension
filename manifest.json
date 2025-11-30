@@ -1,0 +1,13 @@
+{
+  "name": "Steam Game Library Extension",
+  "version": "0.1.0",
+  "author": "Arcadia Team",
+  "description": "Extension for integrating Steam game library into Arcadia",
+  "type": "game_library",
+  "entry_point": "arcadia_steam_extension",
+  "permissions": ["filesystem", "native"],
+  "hooks": ["scan_games", "get_game_details", "launch_game"],
+  "apis": {
+    "provided": ["steam_games", "steam_launcher"]
+  }
+}
