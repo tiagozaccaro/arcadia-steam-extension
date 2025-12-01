@@ -1,0 +1,59 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v0.0.0-${{ github.sha }}
+          name: Release ${{ github.sha }}
+          body: Automated release from main branch merge
+          files: target/release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update store manifest
+        run: |
+          jq '.extensions[0].version = "0.0.0-${{ github.sha }}" | .extensions[0].manifest_url |= sub("main"; "v0.0.0-${{ github.sha }}")' ../arcadia-app/arcadia-store/store-manifest.json > temp.json && mv temp.json ../arcadia-app/arcadia-store/store-manifest.json
+
+      - name: Configure git
+        run: |
+          git config user.name 'github-actions'
+          git config user.email 'github-actions@github.com'
+
+      - name: Commit and push manifest update
+        run: |
+          git add ../arcadia-app/arcadia-store/store-manifest.json
+          git commit -m 'Update store manifest for release [skip ci]'
+          git push origin main
