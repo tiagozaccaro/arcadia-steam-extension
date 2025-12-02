@@ -44,6 +44,11 @@ pub struct SteamExtension {
     steam_install_path: Option<PathBuf>,
 }
 
+impl Default for SteamExtension {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 impl SteamExtension {
     pub fn new() -> Self {
         let manifest = ExtensionManifest {
@@ -112,11 +117,7 @@ impl SteamExtension {
         let steam_path = self.steam_install_path.as_ref()
             .ok_or_else(|| ExtensionError::Validation("Steam path not set".to_string()))?;
 
-        let _config_path = if cfg!(target_os = "windows") {
-            steam_path.join("config").join("config.vdf")
-        } else {
-            steam_path.join("config").join("config.vdf")
-        };
+        let _config_path = steam_path.join("config").join("config.vdf");
 
         // For simplicity, assume default library path
         let default_library = steam_path.join("steamapps");
@@ -136,10 +137,9 @@ impl SteamExtension {
         let mut entries = fs::read_dir(library_path).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("acf") {
-                if let Some(app) = self.parse_app_manifest(&path).await? {
+            if path.extension().and_then(|s| s.to_str()) == Some("acf")
+                && let Some(app) = self.parse_app_manifest(&path).await? {
                     apps.insert(app.appid, app);
-                }
             }
         }
         Ok(apps)
@@ -172,8 +172,8 @@ impl SteamExtension {
         // Very basic VDF extraction - in reality, use a proper VDF parser
         for line in content.lines() {
             let line = line.trim();
-            if line.contains(&format!("\"{}\"", key)) {
-                if let Some(start) = line.find(&format!("\"{}\"", key)) {
+            if line.contains(&format!("\"{}\"", key))
+                && let Some(start) = line.find(&format!("\"{}\"", key)) {
                     let after_key = &line[start + key.len() + 2..];
                     if let Some(quote_start) = after_key.find('"') {
                         let after_quote = &after_key[quote_start + 1..];
@@ -181,7 +181,6 @@ impl SteamExtension {
                             return Ok(after_quote[..quote_end].to_string());
                         }
                     }
-                }
             }
         }
         Err(ExtensionError::Validation(format!("Key {} not found", key)))
@@ -224,10 +223,9 @@ impl SteamExtension {
         if cfg!(target_os = "windows") {
             let mut entries = fs::read_dir(game_dir).await?;
             while let Some(entry) = entries.next_entry().await? {
-                if let Some(ext) = entry.path().extension() {
-                    if ext == "exe" {
+                if let Some(ext) = entry.path().extension()
+                    && ext == "exe" {
                         return Ok(Some(entry.path().to_string_lossy().to_string()));
-                    }
                 }
             }
         }
@@ -252,7 +250,7 @@ impl SteamExtension {
             std::process::Command::new(&executable)
                 .current_dir(game.working_dir.as_ref().unwrap_or(&".".to_string()))
                 .spawn()
-                .map_err(|e| ExtensionError::Io(e))?;
+                .map_err(ExtensionError::Io)?;
             Ok(())
         } else {
             Err(ExtensionError::Validation("No executable found for game".to_string()))
@@ -334,4 +332,92 @@ mod tests {
         let extension = SteamExtension::new();
         assert_eq!(extension.get_id(), "steam_extension");
     }
+#[cfg(test)]
+mod steam_tests {
+    use super::*;
+
+    #[test]
+    fn test_steam_extension_new() {
+        let extension = SteamExtension::new();
+        assert_eq!(extension.get_id(), "steam_extension");
+        assert_eq!(extension.get_manifest().name, "Steam Game Library Extension");
+        assert_eq!(extension.get_manifest().extension_type, ExtensionType::GameLibrary);
+    }
+
+    #[test]
+    fn test_extract_vdf_value() {
+        let extension = SteamExtension::new();
+        let vdf_content = r#"
+            "AppState"
+            {
+                "appid"    "12345"
+                "name"    "Test Game"
+                "installdir"    "test_game"
+            }
+        "#;
+
+        let appid = extension.extract_vdf_value(vdf_content, "appid").unwrap();
+        assert_eq!(appid, "12345");
+
+        let name = extension.extract_vdf_value(vdf_content, "name").unwrap();
+        assert_eq!(name, "Test Game");
+
+        let install_dir = extension.extract_vdf_value(vdf_content, "installdir").unwrap();
+        assert_eq!(install_dir, "test_game");
+    }
+
+    #[test]
+    fn test_extract_vdf_value_missing_key() {
+        let extension = SteamExtension::new();
+        let vdf_content = r#"
+            "AppState"
+            {
+                "appid"    "12345"
+            }
+        "#;
+
+        let result = extension.extract_vdf_value(vdf_content, "name");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_steam_app_structure() {
+        let app = SteamApp {
+            appid: 12345,
+            name: "Test Game".to_string(),
+            install_dir: Some("test_game".to_string()),
+            size_on_disk: Some(1024),
+            last_updated: None,
+            launch_options: None,
+        };
+
+        assert_eq!(app.appid, 12345);
+        assert_eq!(app.name, "Test Game");
+        assert_eq!(app.install_dir, Some("test_game".to_string()));
+    }
+
+    #[test]
+    fn test_steam_game_structure() {
+        let app = SteamApp {
+            appid: 12345,
+            name: "Test Game".to_string(),
+            install_dir: Some("test_game".to_string()),
+            size_on_disk: Some(1024),
+            last_updated: None,
+            launch_options: None,
+        };
+
+        let game = SteamGame {
+            app,
+            executable: Some("game.exe".to_string()),
+            working_dir: Some("C:/games/test_game".to_string()),
+            launch_args: None,
+            icon_path: None,
+            banner_path: None,
+        };
+
+        assert_eq!(game.app.name, "Test Game");
+        assert_eq!(game.executable, Some("game.exe".to_string()));
+    }
+}
 }
